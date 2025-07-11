@@ -8,7 +8,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
-            darkMode: 'class', // or 'media'
+            darkMode: 'class',
         }
     </script>
     <!-- Font Awesome CDN for icons -->
@@ -29,6 +29,13 @@
         .leaflet-container {
             background: #111827; /* bg-gray-900 */
         }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .fade-in {
+            animation: fadeIn 0.5s ease-out forwards;
+        }
     </style>
 </head>
 <body class="bg-gray-900 text-gray-100 min-h-screen font-sans antialiased">
@@ -45,7 +52,21 @@
     <script src="https://unpkg.com/leaflet.markercluster@1.5.1/dist/leaflet.markercluster.js"></script>
 
     <script type="text/babel">
-        const { useState, useEffect, useRef } = React;
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        // Custom hook for debouncing
+        const useDebounce = (value, delay) => {
+            const [debouncedValue, setDebouncedValue] = useState(value);
+            useEffect(() => {
+                const handler = setTimeout(() => {
+                    setDebouncedValue(value);
+                }, delay);
+                return () => {
+                    clearTimeout(handler);
+                };
+            }, [value, delay]);
+            return debouncedValue;
+        };
 
         const App = () => {
             const [events, setEvents] = useState([]);
@@ -58,79 +79,97 @@
                     return [];
                 }
             });
-            const [location, setLocation] = useState('');
-            const [category, setCategory] = useState('');
-            const [keyword, setKeyword] = useState('');
+            const [filters, setFilters] = useState({ location: '', category: '', keyword: '' });
             const [view, setView] = useState('list'); // 'list' or 'map'
             const [notificationPermission, setNotificationPermission] = useState(Notification.permission);
+            const [isLoading, setIsLoading] = useState(true);
+            const [error, setError] = useState(null);
 
-            const TICKETMASTER_API_KEY = 'PG5acZnvvPy3Yq1AtAk1HJmIapqtJIWs'; // Replace with your actual API key
+            const debouncedFilters = useDebounce(filters, 500);
+            const TICKETMASTER_API_KEY = 'PG5acZnvvPy3Yq1AtAk1HJmIapqtJIWs';
 
             useEffect(() => {
                 localStorage.setItem('savedEvents', JSON.stringify(savedEvents));
             }, [savedEvents]);
 
+            const fetchEvents = useCallback(async (currentFilters) => {
+                setIsLoading(true);
+                setError(null);
+                let url = `https://app.ticketmaster.com/discovery/v2/events.json?apikey=${TICKETMASTER_API_KEY}&size=200`;
+                if (currentFilters.location) url += `&city=${currentFilters.location}`;
+                if (currentFilters.category) url += `&classificationName=${currentFilters.category}`;
+                if (currentFilters.keyword) url += `&keyword=${currentFilters.keyword}`;
+
+                try {
+                    const response = await fetch(url);
+                    if (!response.ok) throw new Error(`API error: ${response.statusText}`);
+                    const data = await response.json();
+                    setEvents(data._embedded?.events || []);
+                } catch (err) {
+                    console.error("Error fetching events:", err);
+                    setError('Could not fetch events. Please try a different search.');
+                } finally {
+                    setIsLoading(false);
+                }
+            }, []);
+
             useEffect(() => {
-                fetchEvents();
+                fetchEvents(debouncedFilters);
+            }, [debouncedFilters, fetchEvents]);
+
+            useEffect(() => {
                 requestNotificationPermission();
             }, []);
 
             const requestNotificationPermission = () => {
-                if (!("Notification" in window)) {
-                    console.log("This browser does not support desktop notification");
-                } else if (Notification.permission !== "granted") {
-                    Notification.requestPermission().then(permission => {
-                        setNotificationPermission(permission);
-                    });
+                if ("Notification" in window && Notification.permission !== "granted") {
+                    Notification.requestPermission().then(setNotificationPermission);
                 }
             };
 
-            const fetchEvents = async () => {
-                let url = `https://app.ticketmaster.com/discovery/v2/events.json?apikey=${TICKETMASTER_API_KEY}&size=200`;
-                if (location) url += `&city=${location}`;
-                if (category) url += `&classificationName=${category}`;
-                if (keyword) url += `&keyword=${keyword}`;
-
-                try {
-                    const response = await fetch(url);
-                    const data = await response.json();
-                    setEvents(data._embedded?.events || []);
-                } catch (error) {
-                    console.error("Error fetching events:", error);
-                }
+            const handleFilterChange = (e) => {
+                const { name, value } = e.target;
+                setFilters(prev => ({ ...prev, [name]: value }));
             };
 
             const handleGeolocation = () => {
                 if (navigator.geolocation) {
+                    setIsLoading(true);
+                    setError(null);
                     navigator.geolocation.getCurrentPosition(
                         async (position) => {
                             const { latitude, longitude } = position.coords;
                             let url = `https://app.ticketmaster.com/discovery/v2/events.json?apikey=${TICKETMASTER_API_KEY}&latlong=${latitude},${longitude}&size=200`;
                             try {
                                 const response = await fetch(url);
+                                if (!response.ok) throw new Error(`API error: ${response.statusText}`);
                                 const data = await response.json();
                                 setEvents(data._embedded?.events || []);
-                            } catch (error) {
-                                console.error("Error fetching events by geolocation:", error);
+                                // Optionally, reverse geocode to set the city name in the input
+                            } catch (err) {
+                                console.error("Error fetching events by geolocation:", err);
+                                setError('Could not fetch events for your location.');
+                            } finally {
+                                setIsLoading(false);
                             }
                         },
-                        (error) => {
-                            console.error("Geolocation error:", error);
-                            alert("Unable to retrieve your location. Please enter a city manually.");
+                        (err) => {
+                            console.error("Geolocation error:", err);
+                            alert("Unable to retrieve your location.");
+                            setIsLoading(false);
                         }
                     );
                 } else {
                     alert("Geolocation is not supported by this browser.");
                 }
             };
+            
+            const clearFilters = () => {
+                setFilters({ location: '', category: '', keyword: '' });
+            };
 
             const saveEvent = (event) => {
-                setSavedEvents(prev => {
-                    if (!prev.some(e => e.id === event.id)) {
-                        return [...prev, { ...event, notes: '' }];
-                    }
-                    return prev;
-                });
+                setSavedEvents(prev => prev.some(e => e.id === event.id) ? prev : [...prev, { ...event, notes: '' }]);
             };
 
             const removeSavedEvent = (eventId) => {
@@ -138,112 +177,60 @@
             };
 
             const updateSavedEventNotes = (eventId, notes) => {
-                setSavedEvents(prev => prev.map(event =>
-                    event.id === eventId ? { ...event, notes } : event
-                ));
+                setSavedEvents(prev => prev.map(event => event.id === eventId ? { ...event, notes } : event));
             };
 
             const scheduleNotification = (event, time) => {
                 if (notificationPermission === "granted") {
                     const eventDate = new Date(event.dates.start.dateTime);
                     const reminderTime = new Date(eventDate.getTime() - time * 60 * 1000);
-
                     if (reminderTime > new Date()) {
                         setTimeout(() => {
-                            new Notification(event.name, {
-                                body: `Reminder: Your event "${event.name}" is starting soon at ${event.dates.start.localTime} on ${event.dates.start.localDate} at ${event._embedded.venues[0].name}.`,
-                                icon: event.images && event.images.length > 0 ? event.images[0].url : ''
-                            });
+                            new Notification(event.name, { body: `Reminder: Your event is starting soon!`, icon: event.images?.[0]?.url });
                         }, reminderTime.getTime() - new Date().getTime());
                         alert(`Reminder set for ${event.name}`);
                     } else {
-                        alert("Cannot schedule reminder for a past or immediate event.");
+                        alert("Cannot schedule reminder for a past event.");
                     }
                 } else {
-                    alert("Notification permission not granted. Please enable notifications in your browser settings.");
+                    alert("Please grant notification permissions.");
                 }
             };
+
+            const LoadingSpinner = () => (
+                <div className="flex justify-center items-center p-10"><div className="w-16 h-16 border-4 border-purple-400 border-t-transparent rounded-full animate-spin"></div></div>
+            );
+
+            const ErrorDisplay = ({ message }) => (
+                <div className="text-center p-10 bg-red-900/20 border border-red-500 rounded-lg"><p className="text-red-400 font-semibold">Oops!</p><p className="text-red-300">{message}</p></div>
+            );
 
             const EventCard = ({ event, onSave, onRemove, onUpdateNotes, isSaved, onScheduleNotification }) => {
                 const [showNotes, setShowNotes] = useState(false);
                 const [notes, setNotes] = useState(event.notes || '');
                 const [reminderMinutes, setReminderMinutes] = useState(30);
-
-                const imageUrl = event.images && event.images.length > 0 ? event.images[0].url : 'https://via.placeholder.com/400x200/1f2937/FFFFFF?text=No+Image';
-                const venueName = event._embedded?.venues?.[0]?.name || 'N/A';
-                const city = event._embedded?.venues?.[0]?.city?.name || 'N/A';
-                const state = event._embedded?.venues?.[0]?.state?.name || '';
-                const country = event._embedded?.venues?.[0]?.country?.name || '';
-                const address = event._embedded?.venues?.[0]?.address?.line1 || '';
-
-                const displayLocation = [address, city, state, country].filter(Boolean).join(', ');
-
+                const imageUrl = event.images?.[0]?.url || 'https://via.placeholder.com/400x200/1f2937/FFFFFF?text=No+Image';
                 return (
-                    <div className="bg-gray-800 rounded-xl shadow-lg overflow-hidden mb-6 transform transition duration-300 hover:scale-105 hover:shadow-purple-500/20">
-                        <img src={imageUrl} alt={event.name} className="w-full h-56 object-cover"/>
+                    <div className="bg-gray-800 rounded-xl shadow-lg overflow-hidden mb-6 transform transition duration-300 hover:scale-105 hover:shadow-purple-500/20 fade-in">
+                        <img src={imageUrl} alt={event.name} className="w-full h-56 object-cover" loading="lazy"/>
                         <div className="p-5">
                             <h3 className="font-bold text-2xl mb-2 text-gray-100 leading-tight">{event.name}</h3>
-                            <p className="text-gray-400 text-sm mb-1"><i className="fas fa-calendar-alt mr-2"></i>Date: {event.dates.start.localDate} at {event.dates.start.localTime}</p>
-                            <p className="text-gray-400 text-sm mb-2"><i className="fas fa-map-marker-alt mr-2"></i>Venue: {venueName} - {displayLocation}</p>
-                            <a href={event.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline text-base font-medium flex items-center"><i className="fas fa-ticket-alt mr-2"></i>Get Tickets</a>
-
+                            <p className="text-gray-400 text-sm mb-1"><i className="fas fa-calendar-alt mr-2"></i>{event.dates.start.localDate} at {event.dates.start.localTime}</p>
+                            <p className="text-gray-400 text-sm mb-2"><i className="fas fa-map-marker-alt mr-2"></i>{event._embedded?.venues?.[0]?.name} - {event._embedded?.venues?.[0]?.city?.name}</p>
+                            <a href={event.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline text-base font-medium"><i className="fas fa-ticket-alt mr-2"></i>Get Tickets</a>
                             <div className="mt-4 flex flex-wrap gap-2">
                                 {isSaved ? (
-                                    <>
-                                        <button
-                                            onClick={() => onRemove(event.id)}
-                                            className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg text-sm transition duration-200 ease-in-out"
-                                        >
-                                            <i className="fas fa-trash-alt mr-2"></i>Remove
-                                        </button>
-                                        <button
-                                            onClick={() => setShowNotes(!showNotes)}
-                                            className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg text-sm transition duration-200 ease-in-out"
-                                        >
-                                            <i className="fas fa-sticky-note mr-2"></i>{showNotes ? 'Hide Notes' : 'Add/View Notes'}
-                                        </button>
-                                    </>
+                                    <><button onClick={() => onRemove(event.id)} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg text-sm"><i className="fas fa-trash-alt mr-2"></i>Remove</button><button onClick={() => setShowNotes(!showNotes)} className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg text-sm"><i className="fas fa-sticky-note mr-2"></i>{showNotes ? 'Hide' : 'Notes'}</button></>
                                 ) : (
-                                    <button
-                                        onClick={() => onSave(event)}
-                                        className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg text-sm transition duration-200 ease-in-out"
-                                    >
-                                        <i className="fas fa-bookmark mr-2"></i>Save Event
-                                    </button>
+                                    <button onClick={() => onSave(event)} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg text-sm"><i className="fas fa-bookmark mr-2"></i>Save</button>
                                 )}
                             </div>
-
                             {isSaved && showNotes && (
-                                <div className="mt-5 p-4 bg-gray-700 rounded-lg border border-gray-600">
-                                    <textarea
-                                        className="w-full p-3 border border-gray-600 bg-gray-800 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500 text-sm mb-3 text-white"
-                                        placeholder="Add your notes here..."
-                                        value={notes}
-                                        onChange={(e) => {
-                                            setNotes(e.target.value);
-                                            onUpdateNotes(event.id, e.target.value);
-                                        }}
-                                    ></textarea>
+                                <div className="mt-5 p-4 bg-gray-700 rounded-lg border border-gray-600 fade-in">
+                                    <textarea className="w-full p-3 border-gray-600 bg-gray-800 rounded-md focus:ring-purple-500 text-sm mb-3 text-white" placeholder="Add notes..." value={notes} onChange={(e) => { setNotes(e.target.value); onUpdateNotes(event.id, e.target.value); }}></textarea>
                                     <div className="flex items-center space-x-3">
-                                        <label htmlFor={`reminder-${event.id}`} className="text-sm font-medium text-gray-300">Remind me:</label>
-                                        <select
-                                            id={`reminder-${event.id}`}
-                                            value={reminderMinutes}
-                                            onChange={(e) => setReminderMinutes(parseInt(e.target.value))}
-                                            className="p-2 border border-gray-600 bg-gray-800 rounded-md text-sm focus:ring-purple-500 focus:border-purple-500 text-white"
-                                        >
-                                            <option value="5">5 mins before</option>
-                                            <option value="15">15 mins before</option>
-                                            <option value="30">30 mins before</option>
-                                            <option value="60">1 hour before</option>
-                                            <option value="120">2 hours before</option>
-                                        </select>
-                                        <button
-                                            onClick={() => onScheduleNotification(event, reminderMinutes)}
-                                            className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg text-sm transition duration-200 ease-in-out"
-                                        >
-                                            <i className="fas fa-bell mr-2"></i>Set Reminder
-                                        </button>
+                                        <select value={reminderMinutes} onChange={(e) => setReminderMinutes(parseInt(e.target.value))} className="p-2 border-gray-600 bg-gray-800 rounded-md text-sm focus:ring-purple-500 text-white"><option value="30">30 mins before</option><option value="60">1 hour before</option></select>
+                                        <button onClick={() => onScheduleNotification(event, reminderMinutes)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg text-sm"><i className="fas fa-bell mr-2"></i>Set Reminder</button>
                                     </div>
                                 </div>
                             )}
@@ -252,108 +239,45 @@
                 );
             };
 
-            const EventList = ({ events, savedEvents, onSave, onRemove, onUpdateNotes, onScheduleNotification }) => {
-                return (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                        {events.length > 0 ? (
-                            events.map(event => (
-                                <EventCard
-                                    key={event.id}
-                                    event={event}
-                                    onSave={onSave}
-                                    onRemove={onRemove}
-                                    onUpdateNotes={onUpdateNotes}
-                                    isSaved={savedEvents.some(e => e.id === event.id)}
-                                    onScheduleNotification={onScheduleNotification}
-                                />
-                            ))
-                        ) : (
-                            <p className="col-span-full text-center text-gray-400 text-lg py-10">No events found. Try a different search or location.</p>
-                        )}
-                    </div>
-                );
-            };
+            const EventList = ({ events, ...props }) => (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                    {events.length > 0 ? events.map(event => <EventCard key={event.id} event={event} {...props} />) : <p className="col-span-full text-center text-gray-400 text-lg py-10">No events found.</p>}
+                </div>
+            );
 
-            const FilterBar = ({ location, setLocation, category, setCategory, keyword, setKeyword, onSearch, onGeolocation }) => {
-                const categories = ["Music", "Sports", "Arts & Theatre", "Family", "Film", "Miscellaneous"];
-
+            const FilterBar = ({ filters, onChange, onGeolocation, onClear, onSearch }) => {
+                const categories = ["Music", "Sports", "Arts & Theatre", "Family", "Film"];
                 return (
                     <div className="bg-gray-800 p-6 rounded-lg shadow-inner mb-6 border border-gray-700">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-                            <div>
-                                <label htmlFor="location" className="block text-sm font-semibold text-gray-300 mb-1">Location (City)</label>
-                                <input
-                                    type="text"
-                                    id="location"
-                                    className="mt-1 block w-full p-3 border border-gray-600 bg-gray-700 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500 transition duration-200 ease-in-out text-white"
-                                    value={location}
-                                    onChange={(e) => setLocation(e.target.value)}
-                                    placeholder="e.g., New York"
-                                />
-                                <button
-                                    onClick={onGeolocation}
-                                    className="mt-3 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md text-sm w-full transition duration-200 ease-in-out transform hover:scale-105"
-                                >
-                                    Use My Current Location
-                                </button>
-                            </div>
-                            <div>
-                                <label htmlFor="category" className="block text-sm font-semibold text-gray-300 mb-1">Category</label>
-                                <select
-                                    id="category"
-                                    className="mt-1 block w-full p-3 border border-gray-600 bg-gray-700 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500 transition duration-200 ease-in-out text-white"
-                                    value={category}
-                                    onChange={(e) => setCategory(e.target.value)}
-                                >
-                                    <option value="">All Categories</option>
-                                    {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                                </select>
-                            </div>
-                            <div>
-                                <label htmlFor="keyword" className="block text-sm font-semibold text-gray-300 mb-1">Keyword</label>
-                                <input
-                                    type="text"
-                                    id="keyword"
-                                    className="mt-1 block w-full p-3 border border-gray-600 bg-gray-700 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500 transition duration-200 ease-in-out text-white"
-                                    value={keyword}
-                                    onChange={(e) => setKeyword(e.target.value)}
-                                    placeholder="e.g., concert, band name"
-                                />
-                            </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+                            <input type="text" name="location" value={filters.location} onChange={onChange} placeholder="Location (City)" className="w-full p-3 bg-gray-700 border-gray-600 rounded-md focus:ring-purple-500 text-white"/>
+                            <select name="category" value={filters.category} onChange={onChange} className="w-full p-3 bg-gray-700 border-gray-600 rounded-md focus:ring-purple-500 text-white">
+                                <option value="">All Categories</option>
+                                {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                            </select>
+                            <input type="text" name="keyword" value={filters.keyword} onChange={onChange} placeholder="Keyword (e.g., concert)" className="w-full p-3 bg-gray-700 border-gray-600 rounded-md focus:ring-purple-500 text-white"/>
+                            <button onClick={onGeolocation} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md"><i className="fas fa-location-arrow mr-2"></i>Use My Location</button>
                         </div>
-                        <button
-                            onClick={onSearch}
-                            className="w-full bg-purple-700 hover:bg-purple-800 text-white font-bold py-3 px-4 rounded-md shadow-lg transition duration-200 ease-in-out transform hover:scale-105"
-                        >
-                            Search Events
-                        </button>
+                        <div className="flex gap-4">
+                            <button onClick={() => onSearch(filters)} className="w-full bg-purple-700 hover:bg-purple-800 text-white font-bold py-3 rounded-md shadow-lg transform hover:scale-105">Search</button>
+                            <button onClick={onClear} className="w-full bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 rounded-md shadow-lg">Clear</button>
+                        </div>
                     </div>
                 );
             };
 
-            const SavedEvents = ({ savedEvents, onRemove, onUpdateNotes, onScheduleNotification }) => {
-                return (
-                    <div className="mt-12 p-6 bg-gray-800 rounded-xl shadow-inner border border-gray-700">
-                        <h2 className="text-3xl font-bold text-gray-100 mb-6 text-center">My Saved Events</h2>
-                        {savedEvents.length > 0 ? (
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                                {savedEvents.map(event => (
-                                    <EventCard
-                                        key={event.id}
-                                        event={event}
-                                        onRemove={onRemove}
-                                        onUpdateNotes={onUpdateNotes}
-                                        isSaved={true}
-                                        onScheduleNotification={onScheduleNotification}
-                                    />
-                                ))}
-                            </div>
-                        ) : (
-                            <p className="text-gray-400 text-center text-lg py-10">You haven't saved any events yet. Start exploring and save your favorites!</p>
-                        )}
-                    </div>
-                );
-            };
+            const SavedEvents = ({ savedEvents, ...props }) => (
+                <div className="mt-12 p-6 bg-gray-800 rounded-xl shadow-inner border-gray-700">
+                    <h2 className="text-3xl font-bold text-gray-100 mb-6 text-center">My Saved Events</h2>
+                    {savedEvents.length > 0 ? (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                            {savedEvents.map(event => <EventCard key={event.id} event={event} isSaved={true} {...props} />)}
+                        </div>
+                    ) : (
+                        <p className="text-gray-400 text-center text-lg py-10">You haven't saved any events yet.</p>
+                    )}
+                </div>
+            );
 
             const MapView = ({ events }) => {
                 const mapRef = useRef(null);
@@ -362,16 +286,9 @@
 
                 useEffect(() => {
                     if (typeof L === 'undefined') return;
-
                     if (!mapInstance.current && mapRef.current) {
-                        mapInstance.current = L.map(mapRef.current).setView([40.7128, -74.0060], 10); // Default to NYC
-
-                        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-                            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-                            subdomains: 'abcd',
-                            maxZoom: 19
-                        }).addTo(mapInstance.current);
-
+                        mapInstance.current = L.map(mapRef.current).setView([40.7128, -74.0060], 10);
+                        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { attribution: '&copy; OpenStreetMap &copy; CARTO', subdomains: 'abcd', maxZoom: 19 }).addTo(mapInstance.current);
                         markers.current = L.markerClusterGroup();
                         mapInstance.current.addLayer(markers.current);
                     }
@@ -380,13 +297,9 @@
                     const eventMarkers = [];
                     events.forEach(event => {
                         const venue = event._embedded?.venues?.[0];
-                        if (venue?.location?.latitude && venue?.location?.longitude) {
+                        if (venue?.location) {
                             const marker = L.marker([venue.location.latitude, venue.location.longitude]);
-                            marker.bindPopup(`
-                                <b>${event.name}</b><br>
-                                ${venue.name}<br>
-                                <a href="${event.url}" target="_blank" rel="noopener noreferrer">Get Tickets</a>
-                            `);
+                            marker.bindPopup(`<b>${event.name}</b><br>${venue.name}<br><a href="${event.url}" target="_blank">Get Tickets</a>`);
                             eventMarkers.push(marker);
                         }
                     });
@@ -394,69 +307,25 @@
                     if (eventMarkers.length > 0) {
                         markers.current.addLayers(eventMarkers);
                         const bounds = L.featureGroup(eventMarkers).getBounds();
-                        if (bounds.isValid()) {
-                            mapInstance.current.fitBounds(bounds.pad(0.1));
-                        }
+                        if (bounds.isValid()) mapInstance.current.fitBounds(bounds.pad(0.1));
                     }
-
                 }, [events]);
 
-                return (
-                    <div className="mt-8">
-                        <div id="map-container" ref={mapRef} className="w-full h-[600px] bg-gray-800 rounded-lg shadow-lg"></div>
-                    </div>
-                );
+                return <div ref={mapRef} className="w-full h-[600px] bg-gray-800 rounded-lg shadow-lg mt-8"></div>;
             };
 
             return (
                 <div className="container mx-auto p-4 sm:p-6 lg:p-8">
                     <h1 className="text-5xl font-extrabold text-center text-purple-400 mb-8 tracking-tight">Real-Time Event Finder</h1>
-
-                    <FilterBar
-                        location={location}
-                        setLocation={setLocation}
-                        category={category}
-                        setCategory={setCategory}
-                        keyword={keyword}
-                        setKeyword={setKeyword}
-                        onSearch={fetchEvents}
-                        onGeolocation={handleGeolocation}
-                    />
-
-                    <div className="flex justify-center mb-8 bg-gray-800 rounded-full p-1 shadow-inner border border-gray-700">
-                        <button
-                            onClick={() => setView('list')}
-                            className={`py-2 px-6 rounded-full text-lg font-semibold transition-all duration-300 ease-in-out ${view === 'list' ? 'bg-purple-600 text-white shadow-md' : 'text-gray-300 hover:bg-gray-700'}`}
-                        >
-                            List View
-                        </button>
-                        <button
-                            onClick={() => setView('map')}
-                            className={`py-2 px-6 rounded-full text-lg font-semibold transition-all duration-300 ease-in-out ${view === 'map' ? 'bg-purple-600 text-white shadow-md' : 'text-gray-300 hover:bg-gray-700'}`}
-                        >
-                            Map View
-                        </button>
+                    <FilterBar filters={filters} onChange={handleFilterChange} onGeolocation={handleGeolocation} onClear={clearFilters} onSearch={fetchEvents} />
+                    <div className="flex justify-center mb-8 bg-gray-800 rounded-full p-1 shadow-inner border-gray-700">
+                        <button onClick={() => setView('list')} className={`py-2 px-6 rounded-full text-lg font-semibold transition-all duration-300 ${view === 'list' ? 'bg-purple-600 text-white shadow-md' : 'text-gray-300 hover:bg-gray-700'}`}>List</button>
+                        <button onClick={() => setView('map')} className={`py-2 px-6 rounded-full text-lg font-semibold transition-all duration-300 ${view === 'map' ? 'bg-purple-600 text-white shadow-md' : 'text-gray-300 hover:bg-gray-700'}`}>Map</button>
                     </div>
-
-                    {view === 'list' ? (
-                        <EventList
-                            events={events}
-                            savedEvents={savedEvents}
-                            onSave={saveEvent}
-                            onRemove={removeSavedEvent}
-                            onUpdateNotes={updateSavedEventNotes}
-                            onScheduleNotification={scheduleNotification}
-                        />
-                    ) : (
-                        <MapView events={events} />
+                    {isLoading ? <LoadingSpinner /> : error ? <ErrorDisplay message={error} /> : (
+                        view === 'list' ? <EventList events={events} savedEvents={savedEvents} onSave={saveEvent} onRemove={removeSavedEvent} onUpdateNotes={updateSavedEventNotes} onScheduleNotification={scheduleNotification} /> : <MapView events={events} />
                     )}
-
-                    <SavedEvents
-                        savedEvents={savedEvents}
-                        onRemove={removeSavedEvent}
-                        onUpdateNotes={updateSavedEventNotes}
-                        onScheduleNotification={scheduleNotification}
-                    />
+                    <SavedEvents savedEvents={savedEvents} onRemove={removeSavedEvent} onUpdateNotes={updateSavedEventNotes} onScheduleNotification={scheduleNotification} />
                 </div>
             );
         };

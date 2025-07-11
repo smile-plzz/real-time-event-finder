@@ -1,0 +1,1 @@
+feat: Optimize UI/UX and simplify input handling
