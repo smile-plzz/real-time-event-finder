@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Event Finder</title>
+    <!-- Tailwind CSS CDN -->
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@3.4.1/dist/tailwind.min.css" rel="stylesheet">
+    <!-- Font Awesome CDN for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+</head>
+<body class="bg-gradient-to-br from-purple-100 to-blue-100 min-h-screen font-sans antialiased">
+    <div id="root"></div>
+
+    <!-- React CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.development.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel for JSX transformation -->
+    <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js"></script>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const App = () => {
+            const [events, setEvents] = useState([]);
+            const [savedEvents, setSavedEvents] = useState(() => {
+                try {
+                    const localData = localStorage.getItem('savedEvents');
+                    return localData ? JSON.parse(localData) : [];
+                } catch (error) {
+                    console.error("Error parsing saved events from localStorage:", error);
+                    return [];
+                }
+            });
+            const [location, setLocation] = useState('');
+            const [category, setCategory] = useState('');
+            const [keyword, setKeyword] = useState('');
+            const [view, setView] = useState('list'); // 'list' or 'map'
+            const [notificationPermission, setNotificationPermission] = useState(Notification.permission);
+
+            const TICKETMASTER_API_KEY = 'PG5acZnvvPy3Yq1AtAk1HJmIapqtJIWs'; // Replace with your actual API key
+
+            useEffect(() => {
+                localStorage.setItem('savedEvents', JSON.stringify(savedEvents));
+            }, [savedEvents]);
+
+            useEffect(() => {
+                fetchEvents();
+                requestNotificationPermission();
+            }, []);
+
+            const requestNotificationPermission = () => {
+                if (!("Notification" in window)) {
+                    console.log("This browser does not support desktop notification");
+                } else if (Notification.permission !== "granted") {
+                    Notification.requestPermission().then(permission => {
+                        setNotificationPermission(permission);
+                    });
+                }
+            };
+
+            const fetchEvents = async () => {
+                let url = `https://app.ticketmaster.com/discovery/v2/events.json?apikey=${TICKETMASTER_API_KEY}`;
+                if (location) url += `&city=${location}`;
+                if (category) url += `&classificationName=${category}`;
+                if (keyword) url += `&keyword=${keyword}`;
+
+                try {
+                    const response = await fetch(url);
+                    const data = await response.json();
+                    setEvents(data._embedded?.events || []);
+                } catch (error) {
+                    console.error("Error fetching events:", error);
+                }
+            };
+
+            const handleGeolocation = () => {
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(
+                        async (position) => {
+                            const { latitude, longitude } = position.coords;
+                            // Reverse geocoding to get city name (optional, for display)
+                            // For simplicity, we'll just use lat/long for API call
+                            let url = `https://app.ticketmaster.com/discovery/v2/events.json?apikey=${TICKETMASTER_API_KEY}&latlong=${latitude},${longitude}`;
+                            try {
+                                const response = await fetch(url);
+                                const data = await response.json();
+                                setEvents(data._embedded?.events || []);
+                            } catch (error) {
+                                console.error("Error fetching events by geolocation:", error);
+                            }
+                        },
+                        (error) => {
+                            console.error("Geolocation error:", error);
+                            alert("Unable to retrieve your location. Please enter a city manually.");
+                        }
+                    );
+                } else {
+                    alert("Geolocation is not supported by this browser.");
+                }
+            };
+
+            const saveEvent = (event) => {
+                setSavedEvents(prev => {
+                    if (!prev.some(e => e.id === event.id)) {
+                        return [...prev, { ...event, notes: '' }];
+                    }
+                    return prev;
+                });
+            };
+
+            const removeSavedEvent = (eventId) => {
+                setSavedEvents(prev => prev.filter(event => event.id !== eventId));
+            };
+
+            const updateSavedEventNotes = (eventId, notes) => {
+                setSavedEvents(prev => prev.map(event =>
+                    event.id === eventId ? { ...event, notes } : event
+                ));
+            };
+
+            const scheduleNotification = (event, time) => {
+                if (notificationPermission === "granted") {
+                    const eventDate = new Date(event.dates.start.dateTime);
+                    const reminderTime = new Date(eventDate.getTime() - time * 60 * 1000); // time in minutes before event
+
+                    if (reminderTime > new Date()) {
+                        setTimeout(() => {
+                            new Notification(event.name, {
+                                body: `Reminder: Your event "${event.name}" is starting soon at ${event.dates.start.localTime} on ${event.dates.start.localDate} at ${event._embedded.venues[0].name}.`,
+                                icon: event.images && event.images.length > 0 ? event.images[0].url : ''
+                            });
+                        }, reminderTime.getTime() - new Date().getTime());
+                    } else {
+                        alert("Cannot schedule reminder for a past or immediate event.");
+                    }
+                } else {
+                    alert("Notification permission not granted. Please enable notifications in your browser settings.");
+                }
+            };
+
+            const EventCard = ({ event, onSave, onRemove, onUpdateNotes, isSaved, onScheduleNotification }) => {
+                const [showNotes, setShowNotes] = useState(false);
+                const [notes, setNotes] = useState(event.notes || '');
+                const [reminderMinutes, setReminderMinutes] = useState(30); // Default 30 minutes
+
+                const imageUrl = event.images && event.images.length > 0 ? event.images[0].url : 'https://via.placeholder.com/400x200/E0E0E0/FFFFFF?text=No+Image';
+                const venueName = event._embedded?.venues?.[0]?.name || 'N/A';
+                const city = event._embedded?.venues?.[0]?.city?.name || 'N/A';
+                const state = event._embedded?.venues?.[0]?.state?.name || '';
+                const country = event._embedded?.venues?.[0]?.country?.name || '';
+                const address = event._embedded?.venues?.[0]?.address?.line1 || '';
+
+                const displayLocation = [address, city, state, country].filter(Boolean).join(', ');
+
+                return (
+                    <div className="bg-white rounded-xl shadow-lg overflow-hidden mb-6 transform transition duration-300 hover:scale-105 hover:shadow-2xl">
+                        <img src={imageUrl} alt={event.name} className="w-full h-56 object-cover"/>
+                        <div className="p-5">
+                            <h3 className="font-bold text-2xl mb-2 text-gray-900 leading-tight">{event.name}</h3>
+                            <p className="text-gray-600 text-sm mb-1"><i className="fas fa-calendar-alt mr-2"></i>Date: {event.dates.start.localDate} at {event.dates.start.localTime}</p>
+                            <p className="text-gray-600 text-sm mb-2"><i className="fas fa-map-marker-alt mr-2"></i>Venue: {venueName} - {displayLocation}</p>
+                            <a href={event.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline text-base font-medium flex items-center"><i className="fas fa-ticket-alt mr-2"></i>Get Tickets</a>
+
+                            <div className="mt-4 flex flex-wrap gap-2">
+                                {isSaved ? (
+                                    <>
+                                        <button
+                                            onClick={() => onRemove(event.id)}
+                                            className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg text-sm transition duration-200 ease-in-out"
+                                        >
+                                            <i className="fas fa-trash-alt mr-2"></i>Remove
+                                        </button>
+                                        <button
+                                            onClick={() => setShowNotes(!showNotes)}
+                                            className="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg text-sm transition duration-200 ease-in-out"
+                                        >
+                                            <i className="fas fa-sticky-note mr-2"></i>{showNotes ? 'Hide Notes' : 'Add/View Notes'}
+                                        </button>
+                                    </>
+                                ) : (
+                                    <button
+                                        onClick={() => onSave(event)}
+                                        className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg text-sm transition duration-200 ease-in-out"
+                                    >
+                                        <i className="fas fa-bookmark mr-2"></i>Save Event
+                                    </button>
+                                )}
+                            </div>
+
+                            {isSaved && showNotes && (
+                                <div className="mt-5 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                                    <textarea
+                                        className="w-full p-3 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm mb-3"
+                                        placeholder="Add your notes here..."
+                                        value={notes}
+                                        onChange={(e) => {
+                                            setNotes(e.target.value);
+                                            onUpdateNotes(event.id, e.target.value);
+                                        }}
+                                    ></textarea>
+                                    <div className="flex items-center space-x-3">
+                                        <label htmlFor={`reminder-${event.id}`} className="text-sm font-medium text-gray-700">Remind me:</label>
+                                        <select
+                                            id={`reminder-${event.id}`}
+                                            value={reminderMinutes}
+                                            onChange={(e) => setReminderMinutes(parseInt(e.target.value))}
+                                            className="p-2 border border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500"
+                                        >
+                                            <option value="5">5 mins before</option>
+                                            <option value="15">15 mins before</option>
+                                            <option value="30">30 mins before</option>
+                                            <option value="60">1 hour before</option>
+                                            <option value="120">2 hours before</option>
+                                        </select>
+                                        <button
+                                            onClick={() => onScheduleNotification(event, reminderMinutes)}
+                                            className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg text-sm transition duration-200 ease-in-out"
+                                        >
+                                            <i className="fas fa-bell mr-2"></i>Set Reminder
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                );
+            };
+
+            const EventList = ({ events, savedEvents, onSave, onRemove, onUpdateNotes, onScheduleNotification }) => {
+                return (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                        {events.length > 0 ? (
+                            events.map(event => (
+                                <EventCard
+                                    key={event.id}
+                                    event={event}
+                                    onSave={onSave}
+                                    onRemove={onRemove}
+                                    onUpdateNotes={onUpdateNotes}
+                                    isSaved={savedEvents.some(e => e.id === event.id)}
+                                    onScheduleNotification={onScheduleNotification}
+                                />
+                            ))
+                        ) : (
+                            <p className="col-span-full text-center text-gray-500 text-lg py-10">No events found. Try a different search or location.</p>
+                        )}
+                    </div>
+                );
+            };
+
+            const FilterBar = ({ location, setLocation, category, setCategory, keyword, setKeyword, onSearch, onGeolocation }) => {
+                const categories = ["Music", "Sports", "Arts & Theatre", "Family", "Film", "Miscellaneous"]; // Example categories
+
+                return (
+                    <div className="bg-gray-50 p-6 rounded-lg shadow-inner mb-6 border border-gray-200">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                            <div>
+                                <label htmlFor="location" className="block text-sm font-semibold text-gray-800 mb-1">Location (City)</label>
+                                <input
+                                    type="text"
+                                    id="location"
+                                    className="mt-1 block w-full p-3 border border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500 transition duration-200 ease-in-out"
+                                    value={location}
+                                    onChange={(e) => setLocation(e.target.value)}
+                                    placeholder="e.g., New York"
+                                />
+                                <button
+                                    onClick={onGeolocation}
+                                    className="mt-3 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md text-sm w-full transition duration-200 ease-in-out transform hover:scale-105"
+                                >
+                                    Use My Current Location
+                                </button>
+                            </div>
+                            <div>
+                                <label htmlFor="category" className="block text-sm font-semibold text-gray-800 mb-1">Category</label>
+                                <select
+                                    id="category"
+                                    className="mt-1 block w-full p-3 border border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500 transition duration-200 ease-in-out"
+                                    value={category}
+                                    onChange={(e) => setCategory(e.target.value)}
+                                >
+                                    <option value="">All Categories</option>
+                                    {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label htmlFor="keyword" className="block text-sm font-semibold text-gray-800 mb-1">Keyword</label>
+                                <input
+                                    type="text"
+                                    id="keyword"
+                                    className="mt-1 block w-full p-3 border border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500 transition duration-200 ease-in-out"
+                                    value={keyword}
+                                    onChange={(e) => setKeyword(e.target.value)}
+                                    placeholder="e.g., concert, band name"
+                                />
+                            </div>
+                        </div>
+                        <button
+                            onClick={onSearch}
+                            className="w-full bg-purple-700 hover:bg-purple-800 text-white font-bold py-3 px-4 rounded-md shadow-lg transition duration-200 ease-in-out transform hover:scale-105"
+                        >
+                            Search Events
+                        </button>
+                    </div>
+                );
+            };
+
+            const SavedEvents = ({ savedEvents, onRemove, onUpdateNotes, onScheduleNotification }) => {
+                return (
+                    <div className="mt-12 p-6 bg-gray-50 rounded-xl shadow-inner border border-gray-200">
+                        <h2 className="text-3xl font-bold text-gray-800 mb-6 text-center">My Saved Events</h2>
+                        {savedEvents.length > 0 ? (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                                {savedEvents.map(event => (
+                                    <EventCard
+                                        key={event.id}
+                                        event={event}
+                                        onRemove={onRemove}
+                                        onUpdateNotes={onUpdateNotes}
+                                        isSaved={true}
+                                        onScheduleNotification={onScheduleNotification}
+                                    />
+                                ))}
+                            </div>
+                        ) : (
+                            <p className="text-gray-500 text-center text-lg py-10">You haven't saved any events yet. Start exploring and save your favorites!</p>
+                        )}
+                    </div>
+                );
+            };
+
+            // Basic MapView Component (Placeholder - requires Leaflet.js or similar)
+            const MapView = ({ events }) => {
+                const mapRef = useRef(null);
+
+                useEffect(() => {
+                    if (view === 'map' && !mapRef.current) {
+                        // Initialize map here if Leaflet.js is loaded
+                        // Example:
+                        // mapRef.current = L.map('map-container').setView([51.505, -0.09], 13);
+                        // L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                        //     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                        // }).addTo(mapRef.current);
+                        // events.forEach(event => {
+                        //     if (event._embedded?.venues?.[0]?.location?.latitude && event._embedded?.venues?.[0]?.location?.longitude) {
+                        //         L.marker([event._embedded.venues[0].location.latitude, event._embedded.venues[0].location.longitude])
+                        //             .addTo(mapRef.current)
+                        //             .bindPopup(event.name);
+                        //     }
+                        // });
+                    }
+                }, [view, events]);
+
+                return (
+                    <div className="mt-8">
+                        <h2 className="text-2xl font-bold mb-4">Events on Map (Placeholder)</h2>
+                        <div id="map-container" className="w-full h-96 bg-gray-200 flex items-center justify-center text-gray-500">
+                            Map functionality requires a library like Leaflet.js and further implementation.
+                        </div>
+                    </div>
+                );
+            };
+
+
+            return (
+                <div className="container mx-auto p-4 bg-white rounded-xl shadow-lg my-8">
+                    <h1 className="text-5xl font-extrabold text-center text-purple-800 mb-8 tracking-tight">Real-Time Event Finder</h1>
+
+                    <FilterBar
+                        location={location}
+                        setLocation={setLocation}
+                        category={category}
+                        setCategory={setCategory}
+                        keyword={keyword}
+                        setKeyword={setKeyword}
+                        onSearch={fetchEvents}
+                        onGeolocation={handleGeolocation}
+                    />
+
+                    <div className="flex justify-center mb-8 bg-gray-100 rounded-full p-1 shadow-inner">
+                        <button
+                            onClick={() => setView('list')}
+                            className={`py-2 px-6 rounded-full text-lg font-semibold transition-all duration-300 ease-in-out ${view === 'list' ? 'bg-purple-600 text-white shadow-md' : 'text-gray-700 hover:bg-gray-200'}`}
+                        >
+                            List View
+                        </button>
+                        <button
+                            onClick={() => setView('map')}
+                            className={`py-2 px-6 rounded-full text-lg font-semibold transition-all duration-300 ease-in-out ${view === 'map' ? 'bg-purple-600 text-white shadow-md' : 'text-gray-700 hover:bg-gray-200'}`}
+                        >
+                            Map View
+                        </button>
+                    </div>
+
+                    {view === 'list' ? (
+                        <EventList
+                            events={events}
+                            savedEvents={savedEvents}
+                            onSave={saveEvent}
+                            onRemove={removeSavedEvent}
+                            onUpdateNotes={updateSavedEventNotes}
+                            onScheduleNotification={scheduleNotification}
+                        />
+                    ) : (
+                        <MapView events={events} />
+                    )}
+
+                    <SavedEvents
+                        savedEvents={savedEvents}
+                        onRemove={removeSavedEvent}
+                        onUpdateNotes={updateSavedEventNotes}
+                        onScheduleNotification={scheduleNotification}
+                    />
+                </div>
+            );
+        };
+
+        const container = document.getElementById('root');
+        const root = ReactDOM.createRoot(container);
+        root.render(<App />);
+    </script>
+</body>
+</html>
