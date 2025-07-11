@@ -5,7 +5,8 @@ This is a single-page web application that allows users to search for real-time 
 ## Features
 
 *   **Live Event Search:** Instantly search for events by location, category, or keyword. Results update automatically as you type (debounced search).
-*   **Interactive Map View:** Events are displayed on an interactive map using Leaflet.js, with marker clustering for better performance with a large number of events. The map automatically zooms to fit the search results.
+*   **Advanced Filtering:** Filter events by date range (Today, This Weekend, Next 7 Days) and price range (min/max).
+*   **Interactive Map View:** Events are displayed on an interactive map using Leaflet.js, with marker clustering for better performance with a large number of events. The map automatically zooms to fit the search results. Map popups include a direct link to Google Maps for directions.
 *   **List View:** A clean, card-based list view of events.
 *   **In-Page Event Details:** View comprehensive details for each event in a modal overlay, including additional information like price ranges and notes.
 *   **Save Events:** Save events you're interested in to a separate list.

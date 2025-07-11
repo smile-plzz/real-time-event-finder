@@ -136,7 +136,7 @@
                     return [];
                 }
             });
-            const [filters, setFilters] = useState({ location: '', category: '', keyword: '' });
+            const [filters, setFilters] = useState({ location: '', category: '', keyword: '', dateRange: '', priceMin: '', priceMax: '' });
             const [view, setView] = useState('list'); // 'list' or 'map'
             const [notificationPermission, setNotificationPermission] = useState(() => "Notification" in window ? Notification.permission : 'default');
             const [isLoading, setIsLoading] = useState(true);
@@ -157,6 +157,32 @@
                 if (currentFilters.location) url += `&city=${currentFilters.location}`;
                 if (currentFilters.category) url += `&classificationName=${currentFilters.category}`;
                 if (currentFilters.keyword) url += `&keyword=${currentFilters.keyword}`;
+
+                // Date Range Filtering
+                const now = new Date();
+                const today = now.toISOString().split('T')[0] + 'T00:00:00Z';
+                const tomorrow = new Date(now);
+                tomorrow.setDate(now.getDate() + 1);
+                const tomorrowStart = tomorrow.toISOString().split('T')[0] + 'T00:00:00Z';
+
+                if (currentFilters.dateRange === 'today') {
+                    url += `&startDateTime=${today}&endDateTime=${tomorrowStart}`;
+                } else if (currentFilters.dateRange === 'thisWeekend') {
+                    const dayOfWeek = now.getDay(); // 0 for Sunday, 6 for Saturday
+                    const saturday = new Date(now);
+                    saturday.setDate(now.getDate() + (6 - dayOfWeek));
+                    const sunday = new Date(now);
+                    sunday.setDate(now.getDate() + (7 - dayOfWeek));
+                    url += `&startDateTime=${saturday.toISOString().split('T')[0]}T00:00:00Z&endDateTime=${sunday.toISOString().split('T')[0]}T23:59:59Z`;
+                } else if (currentFilters.dateRange === 'next7Days') {
+                    const next7Days = new Date(now);
+                    next7Days.setDate(now.getDate() + 7);
+                    url += `&startDateTime=${today}&endDateTime=${next7Days.toISOString().split('T')[0]}T23:59:59Z`;
+                }
+
+                // Price Range Filtering
+                if (currentFilters.priceMin) url += `&minPrice=${currentFilters.priceMin}`;
+                if (currentFilters.priceMax) url += `&maxPrice=${currentFilters.priceMax}`;
 
                 try {
                     const response = await fetch(url);
@@ -223,7 +249,7 @@
             };
             
             const clearFilters = () => {
-                setFilters({ location: '', category: '', keyword: '' });
+                setFilters({ location: '', category: '', keyword: '', dateRange: '', priceMin: '', priceMax: '' });
             };
 
             const saveEvent = (event) => {
@@ -373,6 +399,18 @@
                             </div>
                             <button onClick={onGeolocation} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md"><i className="fas fa-location-arrow mr-2"></i>My Location</button>
                         </div>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                            <select name="dateRange" value={filters.dateRange} onChange={onChange} className="w-full p-3 bg-gray-700 border-gray-600 rounded-md focus:ring-purple-500 text-white">
+                                <option value="">Any Date</option>
+                                <option value="today">Today</option>
+                                <option value="thisWeekend">This Weekend</option>
+                                <option value="next7Days">Next 7 Days</option>
+                            </select>
+                            <input type="number" name="priceMin" value={filters.priceMin} onChange={onChange} placeholder="Min Price" className="w-full p-3 bg-gray-700 border-gray-600 rounded-md focus:ring-purple-500 text-white"/>
+                            <input type="number" name="priceMax" value={filters.priceMax} onChange={onChange} placeholder="Max Price" className="w-full p-3 bg-gray-700 border-gray-600 rounded-md focus:ring-purple-500 text-white"/>
+                        </div>
+
                         <div className="flex flex-col sm:flex-row gap-4">
                             <button onClick={() => onSearch(filters)} className="w-full bg-purple-700 hover:bg-purple-800 text-white font-bold py-3 rounded-md shadow-lg transform hover:scale-105">Search</button>
                             <button onClick={onClear} className="w-full bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 rounded-md shadow-lg">Clear</button>
@@ -414,7 +452,13 @@
                         const venue = event._embedded?.venues?.[0];
                         if (venue?.location) {
                             const marker = L.marker([venue.location.latitude, venue.location.longitude]);
-                            marker.bindPopup(`<b>${event.name}</b><br>${venue.name}<br><a href="${event.url}" target="_blank">Get Tickets</a>`);
+                            const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${venue.location.latitude},${venue.location.longitude}`;
+                            marker.bindPopup(`
+                                <b>${event.name}</b><br>
+                                ${venue.name}<br>
+                                <a href="${event.url}" target="_blank">Get Tickets</a><br>
+                                <a href="${directionsUrl}" target="_blank" class="text-blue-400 hover:underline mt-2 inline-block"><i class="fas fa-directions mr-1"></i>Directions</a>
+                            `);
                             eventMarkers.push(marker);
                         }
                     });
