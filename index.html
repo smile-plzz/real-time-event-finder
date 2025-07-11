@@ -111,7 +111,7 @@
 
         const { useState, useEffect, useRef, useCallback } = React;
 
-        // Custom hook for debouncing
+        // Custom hook for debouncing (no longer used for live search, but kept for potential future use)
         const useDebounce = (value, delay) => {
             const [debouncedValue, setDebouncedValue] = useState(value);
             useEffect(() => {
@@ -144,7 +144,8 @@
             const [selectedEvent, setSelectedEvent] = useState(null); // New state for selected event
             const [trendingEvents, setTrendingEvents] = useState([]); // New state for trending events
 
-            const debouncedFilters = useDebounce(filters, 500);
+            // debouncedFilters is no longer used for triggering fetchEvents directly
+            // const debouncedFilters = useDebounce(filters, 500);
             const TICKETMASTER_API_KEY = 'PG5acZnvvPy3Yq1AtAk1HJmIapqtJIWs';
 
             useEffect(() => {
@@ -198,6 +199,11 @@
                 }
             }, []);
 
+            // Initial fetch on component mount
+            useEffect(() => {
+                fetchEvents(filters); // Fetch with initial filters
+            }, []);
+
             // Fetch trending events on component mount
             useEffect(() => {
                 const fetchTrendingEvents = async () => {
@@ -212,10 +218,6 @@
                 };
                 fetchTrendingEvents();
             }, []);
-
-            useEffect(() => {
-                fetchEvents(debouncedFilters);
-            }, [debouncedFilters, fetchEvents]);
 
             useEffect(() => {
                 requestNotificationPermission();
@@ -266,6 +268,7 @@
             
             const clearFilters = () => {
                 setFilters({ location: '', category: '', keyword: '', dateRange: '', priceMin: '', priceMax: '' });
+                fetchEvents({ location: '', category: '', keyword: '', dateRange: '', priceMin: '', priceMax: '' }); // Trigger search after clearing
             };
 
             const saveEvent = (event) => {
