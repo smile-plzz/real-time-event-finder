@@ -14,6 +14,7 @@ This is a single-page web application that allows users to search for real-time 
 *   **Event Notes:** Add personal notes to your saved events.
 *   **Event Reminders:** Set browser notifications to remind you about your saved events.
 *   **Geolocation:** Use your current location to find events happening near you.
+*   **Trending/Popular Events:** Discover a curated list of popular events.
 *   **Responsive Design:** The application is designed to work seamlessly on both desktop and mobile devices, with optimized layouts and mobile-specific meta tags.
 *   **Dark Theme:** A sleek, modern dark theme is enabled by default.
 *   **User Feedback:** Includes loading spinners and clear error messages for a better user experience.
