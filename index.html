@@ -44,6 +44,24 @@
         .fade-in {
             animation: fadeIn 0.5s ease-out forwards;
         }
+        .modal-enter {
+            opacity: 0;
+            transform: scale(0.95);
+        }
+        .modal-enter-active {
+            opacity: 1;
+            transform: scale(1);
+            transition: all 0.2s ease-out;
+        }
+        .modal-exit {
+            opacity: 1;
+            transform: scale(1);
+        }
+        .modal-exit-active {
+            opacity: 0;
+            transform: scale(0.95);
+            transition: all 0.2s ease-in;
+        }
     </style>
 </head>
 <body class="bg-gray-900 text-gray-100 min-h-screen font-sans antialiased">
@@ -60,6 +78,37 @@
     <script src="https://unpkg.com/leaflet.markercluster@1.5.1/dist/leaflet.markercluster.js"></script>
 
     <script type="text/babel">
+        console.log("React script started.");
+
+        class ErrorBoundary extends React.Component {
+            constructor(props) {
+                super(props);
+                this.state = { hasError: false, error: null, errorInfo: null };
+            }
+
+            static getDerivedStateFromError(error) {
+                return { hasError: true, error: error };
+            }
+
+            componentDidCatch(error, errorInfo) {
+                console.error("Uncaught error:", error, errorInfo);
+                this.setState({ errorInfo: errorInfo });
+            }
+
+            render() {
+                if (this.state.hasError) {
+                    return (
+                        <div className="text-center p-10 bg-red-900/20 border border-red-500 rounded-lg text-red-400">
+                            <h2 className="text-xl font-bold mb-2">Something went wrong.</h2>
+                            <p>We are sorry for the inconvenience. Please try refreshing the page.</p>
+                            {this.state.error && <details className="mt-4 text-sm text-red-300"><summary>Error Details</summary><pre className="whitespace-pre-wrap break-all text-left">{this.state.error.toString()}\n{this.state.errorInfo?.componentStack}</pre></details>}
+                        </div>
+                    );
+                }
+                return this.props.children;
+            }
+        }
+
         const { useState, useEffect, useRef, useCallback } = React;
 
         // Custom hook for debouncing
@@ -92,6 +141,7 @@
             const [notificationPermission, setNotificationPermission] = useState(Notification.permission);
             const [isLoading, setIsLoading] = useState(true);
             const [error, setError] = useState(null);
+            const [selectedEvent, setSelectedEvent] = useState(null); // New state for selected event
 
             const debouncedFilters = useDebounce(filters, 500);
             const TICKETMASTER_API_KEY = 'PG5acZnvvPy3Yq1AtAk1HJmIapqtJIWs';
@@ -153,6 +203,7 @@
                                 if (!response.ok) throw new Error(`API error: ${response.statusText}`);
                                 const data = await response.json();
                                 setEvents(data._embedded?.events || []);
+                                // Optionally, reverse geocode to set the city name in the input
                             } catch (err) {
                                 console.error("Error fetching events by geolocation:", err);
                                 setError('Could not fetch events for your location.');
@@ -212,13 +263,63 @@
                 <div className="text-center p-10 bg-red-900/20 border border-red-500 rounded-lg"><p className="text-red-400 font-semibold">Oops!</p><p className="text-red-300">{message}</p></div>
             );
 
-            const EventCard = ({ event, onSave, onRemove, onUpdateNotes, isSaved, onScheduleNotification }) => {
+            const EventDetailModal = ({ event, onClose }) => {
+                const modalRef = useRef(null);
+
+                useEffect(() => {
+                    const handleEscape = (e) => {
+                        if (e.key === 'Escape') onClose();
+                    };
+                    document.addEventListener('keydown', handleEscape);
+                    return () => document.removeEventListener('keydown', handleEscape);
+                }, [onClose]);
+
+                if (!event) return null;
+
+                const imageUrl = event.images?.[0]?.url || 'https://via.placeholder.com/800x400/1f2937/FFFFFF?text=No+Image';
+                const venueName = event._embedded?.venues?.[0]?.name || 'N/A';
+                const city = event._embedded?.venues?.[0]?.city?.name || 'N/A';
+                const state = event._embedded?.venues?.[0]?.state?.name || '';
+                const country = event._embedded?.venues?.[0]?.country?.name || '';
+                const address = event._embedded?.venues?.[0]?.address?.line1 || '';
+                const displayLocation = [address, city, state, country].filter(Boolean).join(', ');
+
+                return (
+                    <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center p-4 z-50 modal-enter modal-enter-active" onClick={onClose} role="dialog" aria-modal="true" tabIndex="-1">
+                        <div className="bg-gray-800 rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto transform transition-all scale-100 opacity-100" onClick={e => e.stopPropagation()} ref={modalRef}>
+                            <div className="relative">
+                                <img src={imageUrl} alt={event.name} className="w-full h-64 object-cover rounded-t-lg"/>
+                                <button onClick={onClose} className="absolute top-3 right-3 bg-gray-700 hover:bg-gray-600 text-white rounded-full p-2 focus:outline-none focus:ring-2 focus:ring-purple-500" aria-label="Close event details">
+                                    <i className="fas fa-times"></i>
+                                </button>
+                            </div>
+                            <div className="p-6">
+                                <h2 className="text-3xl font-bold text-gray-100 mb-3">{event.name}</h2>
+                                <p className="text-gray-300 mb-2"><i className="fas fa-calendar-alt mr-2"></i>Date: {event.dates.start.localDate} at {event.dates.start.localTime}</p>
+                                <p className="text-gray-300 mb-2"><i className="fas fa-map-marker-alt mr-2"></i>Venue: {venueName} - {displayLocation}</p>
+                                {event.info && <p className="text-gray-300 mb-4">**Info:** {event.info}</p>}
+                                {event.pleaseNote && <p className="text-gray-300 mb-4">**Please Note:** {event.pleaseNote}</p>}
+                                {event.priceRanges && (
+                                    <p className="text-gray-300 mb-4">
+                                        **Price Range:** {event.priceRanges[0].min} - {event.priceRanges[0].max} {event.priceRanges[0].currency}
+                                    </p>
+                                )}
+                                <a href={event.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md transition duration-200">
+                                    <i className="fas fa-ticket-alt mr-2"></i>Get Tickets
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const EventCard = ({ event, onSave, onRemove, onUpdateNotes, isSaved, onScheduleNotification, onViewDetails }) => {
                 const [showNotes, setShowNotes] = useState(false);
                 const [notes, setNotes] = useState(event.notes || '');
                 const [reminderMinutes, setReminderMinutes] = useState(30);
                 const imageUrl = event.images?.[0]?.url || 'https://via.placeholder.com/400x200/1f2937/FFFFFF?text=No+Image';
                 return (
-                    <div className="bg-gray-800 rounded-xl shadow-lg overflow-hidden mb-6 transform transition duration-300 hover:scale-105 hover:shadow-purple-500/20 fade-in">
+                    <div className="bg-gray-800 rounded-xl shadow-lg overflow-hidden mb-6 transform transition duration-300 hover:scale-105 hover:shadow-purple-500/20 fade-in group">
                         <img src={imageUrl} alt={event.name} className="w-full h-56 object-cover" loading="lazy"/>
                         <div className="p-5">
                             <h3 className="font-bold text-xl md:text-2xl mb-2 text-gray-100 leading-tight">{event.name}</h3>
@@ -231,6 +332,7 @@
                                 ) : (
                                     <button onClick={() => onSave(event)} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg text-sm"><i className="fas fa-bookmark mr-2"></i>Save</button>
                                 )}
+                                <button onClick={() => onViewDetails(event)} className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg text-sm"><i className="fas fa-info-circle mr-2"></i>Details</button>
                             </div>
                             {isSaved && showNotes && (
                                 <div className="mt-5 p-4 bg-gray-700 rounded-lg border border-gray-600 fade-in">
@@ -257,13 +359,19 @@
                 return (
                     <div className="bg-gray-800 p-4 md:p-6 rounded-lg shadow-inner mb-6 border border-gray-700">
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-                            <input type="text" name="location" value={filters.location} onChange={onChange} placeholder="Location (City)" className="w-full p-3 bg-gray-700 border-gray-600 rounded-md focus:ring-purple-500 text-white"/>
+                            <div className="relative">
+                                <input type="text" name="location" value={filters.location} onChange={onChange} placeholder="Location (City)" className="w-full p-3 pr-10 bg-gray-700 border-gray-600 rounded-md focus:ring-purple-500 text-white"/>
+                                <i className="fas fa-map-marker-alt absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+                            </div>
                             <select name="category" value={filters.category} onChange={onChange} className="w-full p-3 bg-gray-700 border-gray-600 rounded-md focus:ring-purple-500 text-white">
                                 <option value="">All Categories</option>
                                 {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
                             </select>
-                            <input type="text" name="keyword" value={filters.keyword} onChange={onChange} placeholder="Keyword (e.g., concert)" className="w-full p-3 bg-gray-700 border-gray-600 rounded-md focus:ring-purple-500 text-white"/>
-                            <button onClick={onGeolocation} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md"><i className="fas fa-location-arrow mr-2"></i>My Location</button>
+                            <div className="relative">
+                                <input type="text" name="keyword" value={filters.keyword} onChange={onChange} placeholder="Keyword (e.g., concert)" className="w-full p-3 pr-10 bg-gray-700 border-gray-600 rounded-md focus:ring-purple-500 text-white"/>
+                                <i className="fas fa-search absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+                            </div>
+                            <button onClick={onGeolocation} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md transition duration-200"><i className="fas fa-location-arrow mr-2"></i>My Location</button>
                         </div>
                         <div className="flex flex-col sm:flex-row gap-4">
                             <button onClick={() => onSearch(filters)} className="w-full bg-purple-700 hover:bg-purple-800 text-white font-bold py-3 rounded-md shadow-lg transform hover:scale-105">Search</button>
@@ -330,16 +438,17 @@
                         <button onClick={() => setView('map')} className={`py-2 px-4 sm:px-6 rounded-full text-base sm:text-lg font-semibold transition-all duration-300 ${view === 'map' ? 'bg-purple-600 text-white shadow-md' : 'text-gray-300 hover:bg-gray-700'}`}>Map</button>
                     </div>
                     {isLoading ? <LoadingSpinner /> : error ? <ErrorDisplay message={error} /> : (
-                        view === 'list' ? <EventList events={events} savedEvents={savedEvents} onSave={saveEvent} onRemove={removeSavedEvent} onUpdateNotes={updateSavedEventNotes} onScheduleNotification={scheduleNotification} /> : <MapView events={events} />
+                        view === 'list' ? <EventList events={events} savedEvents={savedEvents} onSave={saveEvent} onRemove={removeSavedEvent} onUpdateNotes={updateSavedEventNotes} onScheduleNotification={scheduleNotification} onViewDetails={setSelectedEvent} /> : <MapView events={events} />
                     )}
-                    <SavedEvents savedEvents={savedEvents} onRemove={removeSavedEvent} onUpdateNotes={updateSavedEventNotes} onScheduleNotification={scheduleNotification} />
+                    <SavedEvents savedEvents={savedEvents} onRemove={removeSavedEvent} onUpdateNotes={updateSavedEventNotes} onScheduleNotification={scheduleNotification} onViewDetails={setSelectedEvent} />
+                    {selectedEvent && <EventDetailModal event={selectedEvent} onClose={() => setSelectedEvent(null)} />}
                 </div>
             );
         };
 
         const container = document.getElementById('root');
         const root = ReactDOM.createRoot(container);
-        root.render(<App />);
+        root.render(<ErrorBoundary><App /></ErrorBoundary>);
     </script>
 </body>
 </html>

@@ -4,15 +4,19 @@ This is a single-page web application that allows users to search for real-time 
 
 ## Features
 
-*   **Live Event Search:** Instantly search for events by location, category, or keyword. The results update automatically as you type.
+*   **Live Event Search:** Instantly search for events by location, category, or keyword. Results update automatically as you type (debounced search).
 *   **Interactive Map View:** Events are displayed on an interactive map using Leaflet.js, with marker clustering for better performance with a large number of events. The map automatically zooms to fit the search results.
-*   **Dark Theme:** A sleek, modern dark theme is enabled by default.
 *   **List View:** A clean, card-based list view of events.
+*   **In-Page Event Details:** View comprehensive details for each event in a modal overlay, including additional information like price ranges and notes.
 *   **Save Events:** Save events you're interested in to a separate list.
 *   **Event Notes:** Add personal notes to your saved events.
 *   **Event Reminders:** Set browser notifications to remind you about your saved events.
 *   **Geolocation:** Use your current location to find events happening near you.
-*   **Responsive Design:** The application is designed to work on both desktop and mobile devices.
+*   **Responsive Design:** The application is designed to work seamlessly on both desktop and mobile devices, with optimized layouts and mobile-specific meta tags.
+*   **Dark Theme:** A sleek, modern dark theme is enabled by default.
+*   **User Feedback:** Includes loading spinners and clear error messages for a better user experience.
+*   **Performance Optimizations:** Implements lazy loading for images to improve initial page load times.
+*   **Enhanced Interactivity:** Features subtle animations and improved input field feedback.
 
 ## How to Use
 
