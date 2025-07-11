@@ -9,6 +9,7 @@ This is a single-page web application that allows users to search for real-time 
 *   **Interactive Map View:** Events are displayed on an interactive map using Leaflet.js, with marker clustering for better performance with a large number of events. The map automatically zooms to fit the search results. Map popups include a direct link to Google Maps for directions.
 *   **List View:** A clean, card-based list view of events.
 *   **In-Page Event Details:** View comprehensive details for each event in a modal overlay, including additional information like price ranges and notes.
+*   **Share Event:** Easily share event details via native sharing options (Web Share API) or by copying to clipboard.
 *   **Save Events:** Save events you're interested in to a separate list.
 *   **Event Notes:** Add personal notes to your saved events.
 *   **Event Reminders:** Set browser notifications to remind you about your saved events.

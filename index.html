@@ -281,6 +281,30 @@
                 }
             };
 
+            const handleShare = async (event) => {
+                if (navigator.share) {
+                    try {
+                        await navigator.share({
+                            title: event.name,
+                            text: `Check out this event: ${event.name} at ${event._embedded?.venues?.[0]?.name || 'N/A'}!`,
+                            url: event.url,
+                        });
+                        console.log('Event shared successfully');
+                    } catch (error) {
+                        console.error('Error sharing event:', error);
+                    }
+                } else {
+                    // Fallback for browsers that do not support Web Share API
+                    const eventDetails = `Event: ${event.name}\nVenue: ${event._embedded?.venues?.[0]?.name || 'N/A'}\nGet Tickets: ${event.url}`;
+                    navigator.clipboard.writeText(eventDetails).then(() => {
+                        alert('Event details copied to clipboard!');
+                    }).catch(err => {
+                        console.error('Could not copy text: ', err);
+                        alert('Could not copy event details.');
+                    });
+                }
+            };
+
             const LoadingSpinner = () => (
                 <div className="flex justify-center items-center p-10"><div className="w-16 h-16 border-4 border-purple-400 border-t-transparent rounded-full animate-spin"></div></div>
             );
@@ -330,9 +354,14 @@
                                         **Price Range:** {event.priceRanges[0].min} - {event.priceRanges[0].max} {event.priceRanges[0].currency}
                                     </p>
                                 )}
-                                <a href={event.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md transition duration-200">
-                                    <i className="fas fa-ticket-alt mr-2"></i>Get Tickets
-                                </a>
+                                <div className="flex flex-wrap gap-3 mt-4">
+                                    <a href={event.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md transition duration-200">
+                                        <i className="fas fa-ticket-alt mr-2"></i>Get Tickets
+                                    </a>
+                                    <button onClick={() => handleShare(event)} className="inline-flex items-center bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-md transition duration-200">
+                                        <i className="fas fa-share-alt mr-2"></i>Share Event
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -359,6 +388,7 @@
                                     <button onClick={() => onSave(event)} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg text-sm"><i className="fas fa-bookmark mr-2"></i>Save</button>
                                 )}
                                 <button onClick={() => onViewDetails(event)} className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg text-sm"><i className="fas fa-info-circle mr-2"></i>Details</button>
+                                <button onClick={() => handleShare(event)} className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg text-sm"><i className="fas fa-share-alt mr-2"></i>Share</button>
                             </div>
                             {isSaved && showNotes && (
                                 <div className="mt-5 p-4 bg-gray-700 rounded-lg border border-gray-600 fade-in">
@@ -485,7 +515,7 @@
                         view === 'list' ? <EventList events={events} savedEvents={savedEvents} onSave={saveEvent} onRemove={removeSavedEvent} onUpdateNotes={updateSavedEventNotes} onScheduleNotification={scheduleNotification} onViewDetails={setSelectedEvent} /> : <MapView events={events} />
                     )}
                     <SavedEvents savedEvents={savedEvents} onRemove={removeSavedEvent} onUpdateNotes={updateSavedEventNotes} onScheduleNotification={scheduleNotification} onViewDetails={setSelectedEvent} />
-                    {selectedEvent && <EventDetailModal event={selectedEvent} onClose={() => setSelectedEvent(null)} />}
+                    {selectedEvent && <EventDetailModal event={selectedEvent} onClose={() => setSelectedEvent(null)} handleShare={handleShare} />}
                 </div>
             );
         };
